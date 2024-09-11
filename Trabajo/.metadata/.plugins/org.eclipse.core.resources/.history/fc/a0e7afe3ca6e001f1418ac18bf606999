@@ -1,0 +1,20 @@
+package org.unir.tfm.dao;
+
+public class Participante {
+
+	private String name;
+	private Club club;
+	public String getName() {
+		return name;
+	}
+	public void setName(String name) {
+		this.name = name;
+	}
+	public Club getClub() {
+		return club;
+	}
+	public void setClub(Club club) {
+		this.club = club;
+	}
+	
+}

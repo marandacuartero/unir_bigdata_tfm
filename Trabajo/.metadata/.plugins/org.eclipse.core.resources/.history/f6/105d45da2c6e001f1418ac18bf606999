@@ -1,0 +1,105 @@
+package org.unir.tfm;
+
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+
+import org.apache.log4j.Logger;
+import org.serest4j.annotation.db.TMDataSource;
+import org.serest4j.annotation.endpoint.TMServlet;
+import org.serest4j.annotation.rest.TMRest;
+import org.serest4j.annotation.service.TMInjectableContext;
+import org.serest4j.db.AutoQueryBuilder;
+import org.serest4j.db.TMTransactionalLogger;
+import org.unir.tfm.dao.Club;
+import org.unir.tfm.dao.Participante;
+import org.unir.tfm.dao.Tournament;
+
+@TMServlet(pattern = "/loader/*")
+@TMInjectableContext
+@TMDataSource("jdbc/Ianseo")
+public class DataLoader {
+
+	TMTransactionalLogger tl;
+	Logger error;
+	
+	private SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
+	
+    @TMRest
+	public Tournament[] loadTournamentsFrom(String strFecha) {
+    	ArrayList<Tournament> al = new ArrayList<Tournament>();
+    	try( AutoQueryBuilder qb = new AutoQueryBuilder("tournament") ) {
+    		Date fecha = sdf.parse(strFecha);
+    		qb.appendColumn("ToId, ToCode, ToNameShort, ToWhenFrom");
+    		qb.columnValue("ToWhenFrom").op(">=").dateValue(fecha);
+    		ResultSet rs = qb.executeQuery(tl);
+    		while( rs.next() ) {
+    			Tournament tournament = new Tournament();
+    			int i = 1;
+    			tournament.setId(rs.getInt(i++));
+    			tournament.setCode(rs.getString(i++));
+    			tournament.setName(rs.getString(i++));
+    			tournament.setFecha(rs.getDate(i++));
+    			al.add(tournament);
+    		}
+		} catch(Exception e) {
+			error.error("En load tournaments from", e);
+		}
+    	for( Tournament t : al ) {
+    		loadParticipantes(t);
+    	}
+		return al.toArray(new Tournament[al.size()]);
+	}
+
+	private Club loadClub(int id, int torneo) throws SQLException {
+		String code = null;
+		try( AutoQueryBuilder qb = new AutoQueryBuilder("countries") ) {
+			qb.columnValue("CoId").intValue(id);
+			qb.columnValue("CoTournament").intValue(torneo);
+			ResultSet rs = qb.executeQuery(tl);
+			if( rs.next() ) {
+				code = rs.getString(1);
+			}
+		}
+    	try( AutoQueryBuilder qb = new AutoQueryBuilder("countries") ) {
+    		qb.appendColumn("CoCode, CoName").verifyValue(true);
+    		qb.columnValue("CoCode").charValue(code).setDistinct();
+    		qb.closeWith("order by 2");
+    		ResultSet rs = qb.executeQuery(tl);
+    		if( rs.next() ) {
+    			Club club = new Club();
+    			int i = 1;
+    			club.setCode(rs.getString(i++));
+    			club.setName(rs.getString(i++));
+    			return club;
+    		}
+		}
+		return null;
+	}
+
+	private void loadParticipantes(Tournament tournament) {
+		ArrayList<Participante> al = new ArrayList<Participante>();
+    	try( AutoQueryBuilder qb = new AutoQueryBuilder("entries") ) {
+    		qb.appendColumn("EnName, EnFirstName, EnCountry").verifyValue(true);
+    		qb.columnValue("EnTournament").intValue(tournament.getId());
+    		qb.closeWith("order by 2");
+    		ResultSet rs = qb.executeQuery(tl);
+    		while( rs.next() ) {
+    			String str = rs.getString(1) + " " + rs.getString(2);
+    			int ecountry = rs.getInt(3);
+    			Club club = loadClub(tournament.getId(), ecountry);
+    			Participante participante = new Participante();
+    			participante.setName(str);
+    			participante.setClub(club);
+    			al.add(participante);
+    		}
+		} catch(Exception e) {
+			error.error("En loadParticipantes", e);
+		}
+    	tournament.setParticipantes(al.toArray(new Participante[al.size()]));
+	}
+
+    
+}

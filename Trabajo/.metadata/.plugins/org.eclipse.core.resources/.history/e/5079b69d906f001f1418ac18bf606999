@@ -1,0 +1,34 @@
+package org.unir.tfm;
+
+import java.io.IOException;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Iterator;
+
+import org.serest4j.annotation.db.TMNoDataSource;
+import org.serest4j.annotation.endpoint.TMServlet;
+import org.serest4j.annotation.service.TMInjectableContext;
+import org.serest4j.context.TMContext;
+import org.serest4j.proxy.InternalProxyFactory;
+import org.unir.tfm.dao.Tournament;
+
+@TMServlet(pattern = "/copy/*")
+@TMInjectableContext
+@TMNoDataSource
+public class TraceController {
+	
+	TMContext contexto;
+	private SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
+	
+	public Iterator<Object> fromDate(String str) throws ParseException, IOException {
+		Date fecha = sdf.parse(str);
+		Iterator<Tournament> it = InternalProxyFactory.getProxy(IDataLoader.class, contexto).loadTournamentsFrom(fecha);
+		while( it.hasNext() ) {
+			Tournament tournament = it.next();
+			contexto.sendOutput("Leido torneo " + tournament.getId());
+			contexto.sendOutput(tournament);
+		}
+		return null;
+	}
+}

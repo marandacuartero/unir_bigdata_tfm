@@ -1,0 +1,43 @@
+package org.unir.tfm;
+
+import java.io.IOException;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Iterator;
+
+import org.apache.log4j.Logger;
+import org.serest4j.annotation.db.TMNoDataSource;
+import org.serest4j.annotation.endpoint.TMServlet;
+import org.serest4j.annotation.rest.TMRest;
+import org.serest4j.annotation.service.TMInjectableContext;
+import org.serest4j.context.TMContext;
+import org.serest4j.proxy.InternalProxyFactory;
+import org.unir.tfm.dao.Tournament;
+
+@TMServlet(pattern = "/copy/*")
+@TMInjectableContext
+@TMNoDataSource
+public class TraceController {
+	
+	TMContext contexto;
+	Logger debug;
+	private SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
+	private DataAnonimizer dataAnonimizer = new DataAnonimizer();
+	
+	@TMRest
+	public Iterator<Object> fromDate(String str) throws ParseException, IOException {
+		dataAnonimizer.init();
+		Date fecha = sdf.parse(str);
+		Iterator<Tournament> it = InternalProxyFactory.getProxy(IDataLoader.class, contexto).loadTournamentsFrom(fecha);
+		while( it.hasNext() ) {
+			Tournament tournament = it.next();
+			contexto.sendOutput("Leido torneo " + tournament.getId());
+			dataAnonimizer.refactor(tournament, debug);
+			contexto.sendOutput("Participantes anonimizados " + tournament.getParticipantes().length);
+			
+			contexto.sendOutput(tournament);
+		}
+		return null;
+	}
+}

@@ -1,0 +1,8 @@
+package org.unir.tfm;
+
+import org.serest4j.annotation.db.TMDataSource;
+
+@TMDataSource("jdbc/IanseoDest2")
+public class DataWriter2 extends DataWriter {
+
+}

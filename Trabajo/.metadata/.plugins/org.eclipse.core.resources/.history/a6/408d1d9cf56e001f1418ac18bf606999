@@ -1,0 +1,29 @@
+package org.unir.tfm;
+
+import org.serest4j.annotation.db.TMDataSource;
+import org.serest4j.annotation.db.TMNoDataSource;
+import org.serest4j.annotation.endpoint.TMLinkController;
+import org.serest4j.annotation.endpoint.TMServlet;
+import org.serest4j.annotation.rest.TMRest;
+import org.serest4j.annotation.service.TMInjectableContext;
+import org.serest4j.context.TMContext;
+import org.serest4j.proxy.InternalProxyFactory;
+import org.unir.tfm.dao.TrazaTorneo;
+
+@TMServlet(pattern = "/redir/*")
+@TMInjectableContext
+@TMNoDataSource
+public class Redireccion {
+
+	TMContext contexto;
+	
+	@TMRest
+	public TrazaTorneo[] redireccion() {
+		return InternalProxyFactory.getProxy(MI.class, contexto.getRequest()).tracear("12-04-2024");
+	}
+	
+	@TMLinkController(controller=DataLoader.class)
+	private interface MI {
+		TrazaTorneo[] tracear(String strFecha);
+	}
+}

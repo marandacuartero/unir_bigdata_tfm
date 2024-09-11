@@ -1,0 +1,40 @@
+package org.unir.tfm;
+
+import java.util.Date;
+
+import org.apache.log4j.Logger;
+import org.serest4j.annotation.db.TMNoDataSource;
+import org.serest4j.annotation.endpoint.TMServlet;
+import org.serest4j.annotation.rest.TMRest;
+import org.serest4j.annotation.service.TMInjectableContext;
+import org.serest4j.annotation.service.TMNoWaitResponse;
+import org.serest4j.context.ServerStaticContext;
+import org.serest4j.context.TMContext;
+import org.unir.tfm.dao.TrazaTorneo;
+
+@TMServlet(pattern = "/writer/*")
+//@TMInjectableContext
+//@TMDataSource("jdbc/IanseoDest")
+@TMNoDataSource
+@TMInjectableContext
+public class DataWriter {
+
+	ServerStaticContext sc;
+	TMContext contexto;
+	Logger debug;
+
+	@TMRest
+	@TMNoWaitResponse
+	public void saveTrazas(TrazaTorneo[] tt) {
+		long l = System.currentTimeMillis() + 60000;
+		long espera = 30000;
+		do {
+			debug.debug("Esperando " + espera + "msegs hasta " + new Date(l) );
+			try {
+				Thread.sleep(espera);
+			} catch (InterruptedException e) {}
+			espera = l - System.currentTimeMillis();
+		}
+		while(System.currentTimeMillis() < l);
+	}
+}

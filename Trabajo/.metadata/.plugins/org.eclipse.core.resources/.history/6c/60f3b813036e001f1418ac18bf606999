@@ -1,0 +1,8 @@
+package org.unir.tfm.dao;
+
+
+public class Tournament {
+	
+	int id;
+	
+}

@@ -1,0 +1,142 @@
+package org.serest4j.http.idserver.policy;
+
+import java.lang.annotation.Annotation;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import org.apache.log4j.Logger;
+import org.serest4j.annotation.policy.TMBasicClassAccess;
+import org.serest4j.annotation.policy.TMBasicClassRestriction;
+import org.serest4j.annotation.policy.TMUserSessionClass;
+import org.serest4j.common.PropertiesLoader;
+
+import jakarta.servlet.ServletContext;
+
+public class UserDescriptorInstance {
+
+	private AtomicBoolean ab = new AtomicBoolean(false);
+	private HashMap<String, UserDescriptor> ar = new HashMap<String, UserDescriptor>();
+	private ArrayList<CredencialsInterface> permisos = new ArrayList<CredencialsInterface>();
+	private ArrayList<CredencialsInterface> restricciones = new ArrayList<CredencialsInterface>();
+
+	public void build(PropertiesLoader loadGssProperties, ServletContext sc) {
+		synchronized (ar) {
+			if( ab.compareAndSet(false, true) ) {
+				String classNames = loadGssProperties.getProperty("serest4j.policy.userdescriptor");
+				if( classNames != null  &&  classNames.trim().length() > 0 ) {
+					String[] arrClassNames = classNames.split(";");
+					for( String className : arrClassNames ) {
+						try {
+							Class<?> clase = Thread.currentThread().getContextClassLoader().loadClass(className.trim());
+							Annotation[] anotaciones = clase.getAnnotations();
+							Class<?>[] claseSesion = null;
+							if( anotaciones != null ) {
+								for( Annotation a : anotaciones ) {
+									if( a instanceof TMBasicClassAccess ) {
+										ClassListUserCredentials cluc = new ClassListUserCredentials(((TMBasicClassAccess) a).value());
+										permisos.add(cluc);
+									}
+									else if( a instanceof TMBasicClassRestriction ) {
+										ClassListUserCredentials cluc = new ClassListUserCredentials(((TMBasicClassRestriction) a).value());
+										restricciones.add(cluc);
+									}
+									else if( a instanceof TMUserSessionClass ) {
+										claseSesion = ((TMUserSessionClass) a).value();
+									}
+								}
+							}
+							if( claseSesion != null  &&  claseSesion.length > 0 ) {
+								Object descriptorSesionUsuario = clase.getDeclaredConstructor().newInstance();
+								if( descriptorSesionUsuario instanceof UserDescriptor ) {
+									for( Class<?> cl : claseSesion ) {
+										ar.put(cl.getName(), (UserDescriptor)descriptorSesionUsuario);
+									}
+								}
+								System.out.println(sc.getContextPath() + "/DescriptorSesionUsuarioInstance >> " + descriptorSesionUsuario);
+							}
+						} catch (Throwable th) {
+							th.printStackTrace();
+						}
+					}
+					System.out.println(sc.getContextPath() + "/permisos >> " + permisos);
+					System.out.println(sc.getContextPath() + "/restricciones >> " + restricciones);
+				}
+				if( ar.isEmpty() ) {
+					System.out.println(sc.getContextPath() + "/DescriptorSesionUsuarioInstance >> no existe descriptor asociado");
+					System.out.println(sc.getContextPath() + "/:permisos con acceso pleno");
+					System.out.println("Directorio logs creado en XXXXXXXXXXXX-1");
+				}
+			}
+		}
+	}
+
+	public UserDescriptor get(Class<?> classe) {
+		return ar.get(classe.getName());
+	}
+
+	public boolean comprobarCredencialesServicio(Object objetoSesion, String metodo, Logger debug) {
+		if( objetoSesion == null ) {
+			if( restricciones != null  &&  restricciones.size() > 0 ) {
+				for( CredencialsInterface credencialesUsuario : restricciones ) {
+					if( credencialesUsuario != null  &&  credencialesUsuario.isValid(CredentialsType.CONTROLADOR)  &&  credencialesUsuario.comprobarCredenciales(debug, metodo) ) {
+						// encuentro estas credenciales que me restringen el acceso
+						if( debug != null  &&  debug.isTraceEnabled() ) {
+							debug.trace(" >> Sin permisos de acceso basicos para metodo " + metodo);
+						}
+						return false;
+					}
+				}
+			}
+			if( permisos != null  &&  permisos.size() > 0 ) {
+				for( CredencialsInterface credencialesUsuario : permisos ) {
+					if( credencialesUsuario != null  &&  credencialesUsuario.isValid(CredentialsType.CONTROLADOR)  &&  credencialesUsuario.comprobarCredenciales(debug, metodo) ) {
+						// encuentro estas credenciales que me permiten acceder
+						return true;
+					}
+				}
+				return false;
+			}
+			else {
+				return true;
+			}
+		}
+		else {
+			Class<?> clase = objetoSesion.getClass();
+			UserDescriptor userDescriptor = ar.get(clase.getName());
+			if( userDescriptor != null ) {
+				String codigoUsuario = userDescriptor.getUserCode(objetoSesion);
+				if( restricciones != null  &&  restricciones.size() > 0 ) {
+					for( CredencialsInterface credencialesUsuario : restricciones ) {
+						if( credencialesUsuario != null  &&  credencialesUsuario.isValid(CredentialsType.CONTROLADOR)  &&  credencialesUsuario.comprobarCredenciales(debug, metodo) ) {
+							// encuentro estas credenciales que me restringen el acceso
+							if( debug != null  &&  debug.isTraceEnabled() ) {
+								debug.trace(clase + " >> Acceso restringido para usuario=" + codigoUsuario + " por " + credencialesUsuario);
+							}
+							return false;
+						}
+					}
+				}
+				if( permisos != null  &&  permisos.size() > 0 ) {
+					for( CredencialsInterface credencialesUsuario : permisos ) {
+						if( credencialesUsuario != null  &&  credencialesUsuario.isValid(CredentialsType.CONTROLADOR)  &&  credencialesUsuario.comprobarCredenciales(debug, metodo) ) {
+							// encuentro estas credenciales que me permiten acceder
+							return true;
+						}
+					}
+					if( debug != null  &&  debug.isTraceEnabled() ) {
+						debug.trace(clase + " >> Sin permisos de acceso para usuario=" + codigoUsuario);
+					}
+					return false;
+				}
+				return true;
+			}
+			else {
+				if( debug != null  &&  debug.isTraceEnabled() ) {
+					debug.trace("No hay descriptor asociado a la clase " + clase);
+				}
+				return false;
+			}
+		}
+	}
+}

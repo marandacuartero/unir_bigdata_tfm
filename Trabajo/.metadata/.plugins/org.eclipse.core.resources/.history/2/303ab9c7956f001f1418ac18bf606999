@@ -1,0 +1,12 @@
+package org.unir.tfm;
+
+import java.util.ArrayList;
+
+import org.serest4j.annotation.endpoint.TMLinkController;
+import org.unir.tfm.dao.TrazaTorneo;
+
+@TMLinkController(controller=DataWriter.class)
+public interface IDataWriter {
+
+	public void saveTrazas(ArrayList<TrazaTorneo> tt);
+}

@@ -1,0 +1,47 @@
+package org.unir.tfm;
+
+import java.util.TreeMap;
+import java.util.TreeSet;
+
+import org.unir.tfm.dao.Participante;
+import org.unir.tfm.dao.Tournament;
+
+public class DataAnonimizer {
+
+	private TreeMap<String, String> tm = new TreeMap<String, String>();
+	private TreeSet<String> usedNames = new TreeSet<String>();
+
+	void loadDataAnonimizer() {
+
+	}
+
+	void refactor(Tournament[] tournaments) {
+		for (Tournament t : tournaments) {
+			if (t.getParticipantes() != null && t.getParticipantes().length > 0) {
+				for (Participante p : t.getParticipantes()) {
+					StringBuilder sb = new StringBuilder(p.getName().toLowerCase());
+					for (int i = sb.length() - 1; i >= 0; i--) {
+						char c = sb.charAt(i);
+						if (!Character.isAlphabetic(c)) {
+							sb.deleteCharAt(i);
+						}
+					}
+					String name = sb.toString();
+					if (!tm.containsKey(name)) {
+						searchNombre(name);
+					}
+					name = tm.get(name);
+					p.setName(name);
+
+				}
+			}
+		}
+
+	}
+
+	void searchNombre(String name) {
+		
+	}
+
+
+}

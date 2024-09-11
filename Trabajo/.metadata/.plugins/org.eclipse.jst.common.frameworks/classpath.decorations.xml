@@ -1,0 +1,7 @@
+<classpath>
+  <container id="tfm_backend!org.eclipse.jst.j2ee.internal.web.container">
+    <entry id="D:/Trabajo/tfm_backend/src/main/webapp/WEB-INF/lib/serest4j-2.0.0.jar">
+      <source-attachment-path>/serest4j</source-attachment-path>
+    </entry>
+  </container>
+</classpath>

@@ -1,0 +1,25 @@
+package org.unir.tfm;
+
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Iterator;
+
+import org.serest4j.annotation.db.TMNoDataSource;
+import org.serest4j.annotation.endpoint.TMServlet;
+import org.serest4j.annotation.service.TMInjectableContext;
+
+@TMServlet(pattern = "/copy/*")
+@TMInjectableContext
+@TMNoDataSource
+public class TraceController {
+	
+	private SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
+	
+	public Iterator<Object> fromDate(String str) throws ParseException {
+		Date fecha = sdf.parse(str);
+		
+		
+		return null;
+	}
+}

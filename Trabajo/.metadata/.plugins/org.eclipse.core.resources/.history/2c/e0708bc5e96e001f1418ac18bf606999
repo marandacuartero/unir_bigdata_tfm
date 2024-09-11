@@ -1,0 +1,151 @@
+package org.unir.tfm;
+
+import java.sql.ResultSet;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+
+import org.apache.log4j.Logger;
+import org.serest4j.annotation.db.TMDataSource;
+import org.serest4j.annotation.endpoint.TMServlet;
+import org.serest4j.annotation.rest.TMRest;
+import org.serest4j.annotation.service.TMInjectableContext;
+import org.serest4j.db.AutoQueryBuilder;
+import org.serest4j.db.TMTransactionalLogger;
+import org.unir.tfm.dao.Calificaciones;
+import org.unir.tfm.dao.Club;
+import org.unir.tfm.dao.Participante;
+import org.unir.tfm.dao.Tournament;
+
+@TMServlet(pattern = "/loader/*")
+@TMInjectableContext
+@TMDataSource("jdbc/Ianseo")
+public class DataLoader {
+
+	TMTransactionalLogger tl;
+	Logger error;
+	DataAnonimizer dataAnonimizer = new DataAnonimizer();
+
+	private SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
+
+	@TMRest
+	public Tournament[] loadTournamentsFrom(String strFecha) {
+		ArrayList<Tournament> al = new ArrayList<Tournament>();
+		try (AutoQueryBuilder qb = new AutoQueryBuilder("tournament")) {
+			Date fecha = sdf.parse(strFecha);
+			qb.appendColumn("ToId, ToCode, ToNameShort, ToWhenFrom");
+			qb.columnValue("ToWhenFrom").op(">=").dateValue(fecha);
+			ResultSet rs = qb.executeQuery(tl);
+			while (rs.next()) {
+				Tournament tournament = new Tournament();
+				int i = 1;
+				tournament.setId(rs.getInt(i++));
+				tournament.setCode(rs.getString(i++));
+				tournament.setName(rs.getString(i++));
+				tournament.setFecha(rs.getDate(i++));
+				al.add(tournament);
+			}
+		} catch (Exception e) {
+			error.error("En load tournaments from", e);
+		}
+		ArrayList<Tournament> al2 = new ArrayList<Tournament>();
+		for (Tournament t : al) {
+			loadParticipantes(t);
+			if( t.getParticipantes() != null  &&  t.getParticipantes().length > 0 ) {
+				al2.add(t);
+			}
+		}
+		al.clear();
+		Tournament[] tresultado = al2.toArray(new Tournament[al2.size()]);
+		dataAnonimizer.clear();
+		dataAnonimizer.refactor(tresultado);
+		return tresultado;
+	}
+
+	private Club loadClub(int id, int torneo) {
+		String code = null;
+		try (AutoQueryBuilder qb = new AutoQueryBuilder("countries")) {
+			qb.appendColumn("CoCode");
+			qb.columnValue("CoId").intValue(id);
+			qb.columnValue("CoTournament").intValue(torneo);
+			ResultSet rs = qb.executeQuery(tl);
+			if (rs.next()) {
+				code = rs.getString(1);
+			}
+		} catch (Exception e) {
+			error.error("En loadClub", e);
+		}
+		try (AutoQueryBuilder qb = new AutoQueryBuilder("countries")) {
+			qb.appendColumn("CoCode, CoName").verifyValue(true);
+			qb.columnValue("CoCode").charValue(code).setDistinct();
+			qb.closeWith("order by 2");
+			ResultSet rs = qb.executeQuery(tl);
+			if (rs.next()) {
+				Club club = new Club();
+				int i = 1;
+				club.setCode(rs.getString(i++));
+				club.setName(rs.getString(i++));
+				return club;
+			}
+		} catch (Exception e) {
+			error.error("En loadClub", e);
+		}
+		return null;
+	}
+
+	private void loadParticipantes(Tournament tournament) {
+		ArrayList<Participante> al = new ArrayList<Participante>();
+		try (AutoQueryBuilder qb = new AutoQueryBuilder("entries")) {
+			qb.appendColumn("EnId, EnName, EnFirstName, EnCountry").verifyValue(true);
+			qb.columnValue("EnTournament").intValue(tournament.getId());
+			qb.closeWith("order by 2");
+			ResultSet rs = qb.executeQuery(tl);
+			while (rs.next()) {
+				int i = 1;
+				int id = rs.getInt(i++);
+				String str = rs.getString(i++) + " " + rs.getString(i++);
+				int ecountry = rs.getInt(i++);
+				Club club = loadClub(ecountry, tournament.getId());
+				Participante participante = new Participante();
+				participante.setId(id);
+				participante.setName(str);
+				participante.setClub(club);
+				al.add(participante);
+			}
+		} catch (Exception e) {
+			error.error("En loadParticipantes", e);
+		}
+		ArrayList<Participante> al2 = new ArrayList<Participante>();
+		for (Participante p : al) {
+			loadCalificacion(p);
+			if( p.getCalificaciones().getTotal() > 0 ) {
+				al2.add(p);
+			}
+		}
+		al.clear();
+		tournament.setParticipantes(al2.toArray(new Participante[al2.size()]));
+	}
+
+	private void loadCalificacion(Participante p) {
+		try (AutoQueryBuilder qb = new AutoQueryBuilder("qualifications")) {
+			qb.appendColumn("QuD1Score as puntos, QuD1Xnine as dieces, QuD1Gold as equis");
+			qb.appendColumn("QuD2Score as puntos2, QuD2Xnine as dieces2, QuD2Gold as equis2").verifyValue(true);
+			qb.columnValue("QuId").intValue(p.getId());
+			ResultSet rs = qb.executeQuery(tl);
+			if (rs.next()) {
+				Calificaciones calificaciones = new Calificaciones();
+				calificaciones.setPuntosEntrada1(rs.getInt("puntos"));
+				calificaciones.setDiezEntrada1(rs.getInt("dieces"));
+				calificaciones.setxEntrada1(rs.getInt("equis"));
+
+				calificaciones.setPuntosEntrada2(rs.getInt("puntos2"));
+				calificaciones.setDiezEntrada2(rs.getInt("dieces2"));
+				calificaciones.setxEntrada2(rs.getInt("equis2"));
+				
+				p.setCalificaciones(calificaciones);
+			}
+		} catch (Exception e) {
+			error.error("En loadParticipantes", e);
+		}
+	}
+}

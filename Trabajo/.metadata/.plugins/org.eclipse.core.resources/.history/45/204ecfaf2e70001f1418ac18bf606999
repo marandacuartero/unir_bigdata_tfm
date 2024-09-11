@@ -1,0 +1,527 @@
+package org.serest4j.http.rest;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.LineNumberReader;
+import java.io.Reader;
+import java.net.MalformedURLException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.EnumSet;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.Properties;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.apache.log4j.Logger;
+import org.serest4j.annotation.endpoint.TMServlet;
+import org.serest4j.annotation.service.TMProxyEnabled;
+import org.serest4j.audit.AuditProcessor;
+import org.serest4j.buffers.cloud.CloudCacheProxyController;
+import org.serest4j.buffers.cloud.CloudCacheRepository;
+import org.serest4j.common.FileLogger;
+import org.serest4j.common.GSonFormatter;
+import org.serest4j.common.PropertiesLoader;
+import org.serest4j.common.Version;
+import org.serest4j.context.ControllerFactory;
+import org.serest4j.context.ServerStaticContext;
+import org.serest4j.cripto.FlowUtility;
+import org.serest4j.http.idserver.HttpKeyValidator;
+import org.serest4j.http.idserver.KeyContainerCloudCache;
+import org.serest4j.http.idserver.TMIdSesionFilter;
+import org.serest4j.http.idserver.policy.CredencialsInterface;
+import org.serest4j.http.idserver.policy.UserDescriptorInstance;
+import org.serest4j.http.rest.js.JQueryAdapter;
+import org.serest4j.http.rest.js.TMJsFilter;
+import org.serest4j.http.rest.js.TMPropertiesFilter;
+import org.serest4j.http.server.TMDirectProxyServer;
+import org.serest4j.http.server.TMRestServer;
+import org.serest4j.proxy.DirectProxyFactory;
+
+import jakarta.servlet.FilterRegistration;
+import jakarta.servlet.ServletContext;
+import jakarta.servlet.ServletContextEvent;
+import jakarta.servlet.ServletContextListener;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletRegistration;
+import jakarta.servlet.SessionTrackingMode;
+
+/**
+ * serest4j.properties
+ *  org.serest4j.proxy=/nombreproxy
+ *  org.serest4j.sson=/gestorsesiones
+ * proxy.properties
+ *   nombreproxy=lista de urls remotas separadas por punto y coma
+ * rest.properties
+ *   listado de controladores que publican sus servicios rest
+ * js.properties
+ *   listado de controladores que se publican como librerias en javascript
+ *   libreria.js=jquery?es.maranda.config.UserDAO
+ *   propiedades.js=properties?es.config.recursos (acceso a recursos_es_ES.properties mediante internacionalizacion)
+ *     serest4j
+ */
+public class TMRestContextListener implements ServletContextListener {
+
+	private ControllerFactory factoriaControladores;
+	private GSonFormatter gSonFormat = null;
+	private CredencialsInterface[] credencialsInterfacesSinUsuario = null;
+	private int segundosDeDemoraAnteAccesoIlegal = 0;
+	private AtomicInteger aiContador = new AtomicInteger(10);
+	private CloudCacheRepository staticCloudCacheRepository = null;
+
+	private ServerStaticContext serverStaticContext = new ServerStaticContext();
+	
+	private AtomicBoolean ab = new AtomicBoolean(false);
+
+	@Override
+	public void contextDestroyed(ServletContextEvent servletContextEvent) {
+		String contextPath = servletContextEvent.getServletContext().getContextPath();
+		Logger logger = FileLogger.getLogger(contextPath);
+		logger.trace("ServerStaticContext.remove(" + servletContextEvent.getServletContext().getContextPath() + ")");
+		logger.trace("ControllerFactory.destroy() " + factoriaControladores);
+		ControllerFactory controllerFactory = factoriaControladores;
+		if( controllerFactory != null ) {
+			controllerFactory.destroy();
+			controllerFactory = null;
+		}
+		ServerStaticContext.remove(contextPath);
+		if( staticCloudCacheRepository != null ) {
+			staticCloudCacheRepository.stop();
+			staticCloudCacheRepository = null;
+		}
+		FileLogger.remove(contextPath);
+		Runtime.getRuntime().gc();
+	}
+
+	public static PropertiesLoader loadContextProperties(ServletContextEvent servletContextEvent, String append) {
+		String contextPath = servletContextEvent.getServletContext().getContextPath();
+		// cargo propiedades
+		PropertiesLoader loadGssProperties = new PropertiesLoader();
+		StringBuilder sbLogger = new StringBuilder();
+		Properties pinicio = loadGssProperties.loadServletContext(servletContextEvent.getServletContext(), "serest4j.properties", sbLogger);
+		String strAppendFiles = loadGssProperties.getProperty("serest4j.properties.append");
+		if( strAppendFiles == null  ||  "".equalsIgnoreCase(strAppendFiles.trim()) ) {
+			strAppendFiles = append == null ? "" : append.trim();
+		}
+		else {
+			strAppendFiles = strAppendFiles + (append == null ? "" : ";" + append.trim());
+		}
+		sbLogger.append("\n\n");
+		String[] _str = strAppendFiles.trim().replace(',', ';').split(";");
+		for( String __str : _str ) {
+			Properties pappend = new PropertiesLoader().loadServletContext(servletContextEvent.getServletContext(), __str, sbLogger);
+			pappend.putAll(pinicio);
+			pinicio.clear();
+			pinicio.putAll(pappend);
+		}
+		// inicializo debug
+		FileLogger fileLogger = new FileLogger(contextPath, pinicio);
+		FileLogger.put(contextPath, fileLogger);
+		Logger logger = FileLogger.getLogger(contextPath);
+		if( logger != null  &&  logger.isTraceEnabled() ) {
+			logger.trace(sbLogger);
+		}
+		System.out.println("Directorio logs creado en XXXXXXXXXXXX");
+		return loadGssProperties;
+	}
+	
+	@Override
+	public void contextInitialized(ServletContextEvent servletContextEvent) {
+		if( !ab.compareAndSet(false, true) ) {
+			return;
+		}
+		PropertiesLoader loadGssProperties = loadContextProperties(servletContextEvent, "log4j.properties");
+		String contextPath = servletContextEvent.getServletContext().getContextPath();
+		Logger logger = FileLogger.getLogger(contextPath);
+		try {
+			servletContextEvent.getServletContext().setSessionTrackingModes(EnumSet.noneOf(SessionTrackingMode.class));
+		}
+		catch(Throwable th){
+			th.printStackTrace();
+			logger.error("setSessionTrackingModes()", th);
+		}
+
+		this.serverStaticContext.setPropertiesLoader(loadGssProperties);
+		this.segundosDeDemoraAnteAccesoIlegal = loadGssProperties.getInteger("serest4j.unautorized.delay", 0);
+
+		logger.trace("getServletContext().getClassLoader() " + servletContextEvent.getServletContext().getClassLoader());
+		logger.trace("TMRestContextListener.class.getClassLoader() " + TMRestContextListener.class.getClassLoader());
+		logger.trace("Thread.currentThread().getContextClassLoader() " + Thread.currentThread().getContextClassLoader());
+
+		// Inicializo descriptor
+		UserDescriptorInstance userDescriptorInstance = new UserDescriptorInstance();
+		userDescriptorInstance.build(loadGssProperties, servletContextEvent.getServletContext());
+		this.serverStaticContext.setUserDescriptorInstance(userDescriptorInstance);
+		
+		logger.info("UserDescriptorInstance initialiced for " + contextPath);
+		ServerStaticContext.put(contextPath, serverStaticContext);
+
+		// Inicializo auditor
+		AuditProcessor.init(loadGssProperties.getProperty("serest4j.audit.instance"), logger.isDebugEnabled() ? logger : null);
+		// inicializo gson
+		this.gSonFormat = new GSonFormatter(loadGssProperties, logger.isDebugEnabled());
+		this.serverStaticContext.setgSonFormat(this.gSonFormat);
+		// inicializo controladores
+		this.factoriaControladores = ControllerFactory.buildControllerFactory(servletContextEvent.getServletContext().getContextPath(), loadGssProperties, this.gSonFormat, logger);
+		// inicializo firewall
+		this.credencialsInterfacesSinUsuario = initFirewall(servletContextEvent.getServletContext(), logger);
+		try {
+			_contextInitialized(servletContextEvent, loadGssProperties, logger);
+		} catch (Exception ee) {
+			logger.error("contextInitialized", ee);
+			ee.printStackTrace();
+		}
+		logger.debug("ContextPath " + servletContextEvent.getServletContext().getContextPath());
+		logger.debug("ServerInfo " + servletContextEvent.getServletContext().getServerInfo());
+		logger.debug("Generados " + aiContador + " filtros");
+	}
+
+	private static final String COOKIEDOMAIN = "serest4j.sson.domain";
+
+	// Inicializacion de filtros y puntos de acceso 
+	private void _contextInitialized(ServletContextEvent servletContextEvent, PropertiesLoader loadGssProperties, Logger logger) throws MalformedURLException, IOException, ServletException {
+		String contextPath = servletContextEvent.getServletContext().getContextPath();
+		if( servletContextEvent.getServletContext().getMajorVersion() >= 3 ) {
+			String cookieDomain = loadGssProperties.getProperty(COOKIEDOMAIN, null);
+			HashMap<String, RestServicesMapping> hsServlets = new HashMap<String, RestServicesMapping>();
+			HashMap<String, String> sinonimos = new HashMap<String, String>();
+			HashMap<String, ProxyPairs> tokens = new HashMap<String, ProxyPairs>();
+			// carga de servicios rest
+			ByteArrayOutputStream bout = new ByteArrayOutputStream();
+			String restFileName = loadGssProperties.getProperty("serest4j.services", "").trim().replace(',', ';');
+			if( restFileName.length() > 0 ) {
+				for( String controlador : restFileName.split(";") ) {
+					if( controlador.trim().length() > 0 ) {
+						bout.write(controlador.trim().getBytes());
+						bout.write("\n".getBytes());
+					}
+				}
+			}
+			restFileName = loadGssProperties.getProperty("serest4j.services.file");
+			if( restFileName != null  &&  restFileName.trim().length() > 0 ) {
+				try( InputStream isreader = PropertiesLoader.searchInServletContext(servletContextEvent.getServletContext(), restFileName, logger) ) {
+					FlowUtility.flushStream(isreader, bout);
+					bout.write("\n".getBytes());
+				}
+				catch(Exception exc) {
+					logger.error("Cargando servicios " + restFileName, exc);
+				}
+			}
+			if( bout.size() > 0 ) {
+				bout.write(CloudCacheProxyController.class.getName().getBytes());
+				bout.write("\n".getBytes());
+			}
+			try( Reader reader = new InputStreamReader(new ByteArrayInputStream(bout.toByteArray())) ) {
+				try( LineNumberReader lnr = new LineNumberReader(reader) ) {
+					String linea = lnr.readLine();
+					while( linea != null ) {
+						linea = linea.trim();
+						if( linea.length() > 0 ) {
+							if( linea.charAt(0) == '#' ) {}
+							else {
+								Class<?> clase = null;
+								try {
+									clase = servletContextEvent.getServletContext().getClassLoader().loadClass(linea);
+								} catch (Throwable th) {
+									clase = null;
+									logger.error("_contextInitialized( cargando clase " + linea + ")", th);
+								}
+								if( clase != null ) {
+									String[] values = getServletConfig(clase, loadGssProperties);
+									String tokenProxy = isProxy(clase);
+									if( values == null ) {
+										logger.error("Configuracion de Servlet no valida para clase " + linea);
+									}
+									else {
+										if( tokenProxy == null  ||  tokenProxy.isEmpty() ) {
+											// genero el servicio como rest
+											boolean asincrono = values[1] != null;
+											logger.debug("Preparando TMRestServer en " + linea);
+											if( !hsServlets.containsKey(values[0]) ) {
+												String servletName = "TMRestServer" + aiContador.incrementAndGet();
+												TMRestServer tmRestServer = servletContextEvent.getServletContext().createServlet(TMRestServer.class);
+												ServletRegistration.Dynamic dsr = servletContextEvent.getServletContext().addServlet(servletName, tmRestServer);
+												logger.debug("Generado " + servletName + " para " + values[0]);
+												dsr.setAsyncSupported(asincrono);
+												dsr.setLoadOnStartup(aiContador.get());
+												dsr.addMapping(values[0]);
+												RestServicesMapping restServicesMapping = new RestServicesMapping(values[0]);
+												tmRestServer.configureServlet(serverStaticContext.getUserDescriptorInstance(), credencialsInterfacesSinUsuario, factoriaControladores,
+														restServicesMapping, gSonFormat, segundosDeDemoraAnteAccesoIlegal, cookieDomain);
+												hsServlets.put(values[0], restServicesMapping);
+											}
+											logger.debug("Punto de acceso en " + linea);
+											sinonimos.put(linea, values[0]);
+											RestConfigurationLoader.loadInitParameters(logger, clase, hsServlets.get(values[0]));
+										}
+										else {
+											boolean asincrono = values[1] != null;
+											if( hsServlets.containsKey(values[0]) ) {
+												logger.error("No se pudo generar TMInternalProxyServerAsync, el contexto asociado " + values[0] + " ya esta definido en " + printSinonimos(sinonimos, values[0]));
+											}
+											else if( tokens.get(values[0]) == null ) {
+												String servletName = "TMInternalProxyServerAsync" + aiContador.incrementAndGet();
+												TMDirectProxyServer tmDirectProxyServer = servletContextEvent.getServletContext().createServlet(TMDirectProxyServer.class);
+												ServletRegistration.Dynamic dsr = servletContextEvent.getServletContext().addServlet(servletName, tmDirectProxyServer);
+												logger.debug("Generado " + servletName + " de proxy para " + values[0]);
+												dsr.setAsyncSupported(asincrono);
+												dsr.setLoadOnStartup(aiContador.get());
+												dsr.addMapping(values[0]);
+												byte[] tokenClave = loadTokenProxy(servletContextEvent.getServletContext(), tokenProxy, loadGssProperties, logger);
+												ProxyPairs proxyPairs = new ProxyPairs(tokenClave);
+												proxyPairs.addToControllers(clase.getName());
+												logger.debug("Generado " + values[0] + " para " + clase.getName());
+												tokens.put(values[0], proxyPairs);
+												tmDirectProxyServer.configureServlet(factoriaControladores, tokens);
+											}
+											else {
+												tokens.get(values[0]).addToControllers(clase.getName());
+												logger.debug("Generado " + values[0] + " para " + clase.getName());
+											}
+										}
+									}
+								}
+							}
+						}
+						linea = lnr.readLine();
+					}
+				}
+			}
+			catch(Exception exc) {
+				logger.error("Cargando servicios rest", exc);
+			}
+			// Configurando la gestion de cache compartidas
+			CloudCacheRepository cloudCacheRepository = new CloudCacheRepository();
+			if( cloudCacheRepository.init(servletContextEvent.getServletContext(), KeyContainerCloudCache.class) ) {
+				this.staticCloudCacheRepository = cloudCacheRepository;
+			}
+			// configuracion de enlaces con proxys remotos
+			for( String _key : loadGssProperties.keys() ) {
+				if( _key.startsWith("serest4j.proxy.alias.") ) {
+					String value = loadGssProperties.getProperty(_key);
+					String nodo =  _key.substring("serest4j.proxy.alias.".length()).trim();
+					if( nodo.length() > 0 ) {
+						String tokenProxy = loadGssProperties.getProperty("serest4j.proxy.token." + nodo, "").trim();
+						tokenProxy = tokenProxy.trim();
+						byte[] tokenClave = loadTokenProxy(servletContextEvent.getServletContext(), tokenProxy, loadGssProperties, logger);
+						if( value == null )
+							value = "";
+						value = value.trim();
+						if( value.length() > 0 ) {
+							DirectProxyFactory directProxyFactory = ServerStaticContext.get(contextPath).getDirectProxyFactory(nodo);
+							if( directProxyFactory == null ) {
+								directProxyFactory = DirectProxyFactory.newInstance(tokenClave,  logger.isDebugEnabled() ? logger : null, value);
+								int tConexion = -1;
+								int tRespuesta = -1;
+								try { tConexion = Integer.parseInt(loadGssProperties.getProperty("serest4j.proxy.timeout_conexion." + nodo,
+										loadGssProperties.getProperty("serest4j.proxy.timeout_conexion", "").trim())); }catch(Exception e){ tConexion = -1; }
+								try { tRespuesta = Integer.parseInt(loadGssProperties.getProperty("serest4j.proxy.timeout_respuesta." + nodo,
+										loadGssProperties.getProperty("serest4j.proxy.timeout_respuesta").trim())); }catch(Exception e){ tRespuesta = -1; }
+								directProxyFactory.setTimeout(tConexion, tRespuesta);
+								ServerStaticContext.get(contextPath).putDirectProxyFactory(nodo, directProxyFactory);
+							}
+						}
+					}
+				}
+			}
+			ArrayList<String> jsproperties = new ArrayList<String>();
+			Properties p = new Properties();
+			try {
+				p.clear();
+				p.load(PropertiesLoader.searchInServletContext(servletContextEvent.getServletContext(), "js.properties", logger));
+			}
+			catch(Exception exc) {
+				p.clear();
+			}
+			Enumeration<?> e = p.propertyNames();
+			while( e.hasMoreElements() ) {
+				String key = e.nextElement().toString();
+				String value = p.getProperty(key);
+				if( value == null )
+					value = "";
+				value = value.trim();
+				if( value.length() > 0 ) {
+					if( key.endsWith(".js") ) {
+						key = "/" + key.trim();
+						key = key.replaceAll("//", "/");
+						if( value.startsWith("jquery?") ) {
+							logger.debug("Obteniendo javascript >> " + key + "=" + value);
+							String controlador = value.substring("jquery?".length());
+							String dominio = sinonimos.get(controlador);
+							RestServicesMapping restServicesMappingJavaScript = hsServlets.get(dominio);
+							if( restServicesMappingJavaScript != null ) {
+								if( dominio.endsWith("*") ) {
+									dominio = dominio.substring(0, dominio.length() - 1).trim();
+								}
+								if( dominio.endsWith("/") ) {
+									dominio = dominio.substring(0, dominio.length() - 1);
+								}
+								dominio = servletContextEvent.getServletContext().getContextPath() + "/" + dominio;
+								dominio = dominio.replaceAll("//", "/");
+								String javascript = _javascript(servletContextEvent.getServletContext().getClassLoader(), key, controlador, dominio, restServicesMappingJavaScript, logger);
+								if( javascript != null ) {
+									restServicesMappingJavaScript.putService("serest4j.filter.js.__" + key, javascript);
+									TMJsFilter tmJsFilter = servletContextEvent.getServletContext().createFilter(TMJsFilter.class);
+									tmJsFilter.setRestServicesMapping(restServicesMappingJavaScript);
+									String filterName = "TMJsFilter_" + aiContador.incrementAndGet();
+									FilterRegistration.Dynamic dsr = servletContextEvent.getServletContext().addFilter(filterName, tmJsFilter);
+									logger.debug("Generado " + filterName + "\n" + javascript + "\n");
+									dsr.addMappingForUrlPatterns(null, true, key);
+								}
+							}
+						}
+						else if( value.startsWith("properties?") ) {
+							RestServicesMapping restServicesMappingJavaScript = hsServlets.get("properties?");
+							if( restServicesMappingJavaScript == null ) {
+								restServicesMappingJavaScript = new RestServicesMapping("properties?");
+								hsServlets.put("properties?", restServicesMappingJavaScript);
+							}
+							String controlador = value.substring("properties?".length());
+							restServicesMappingJavaScript.putService("serest4j.filter.js.__" + key, controlador);
+							jsproperties.add(key);
+						}
+					}
+				}
+			}
+			if( jsproperties.size() > 0 ) {
+				TMPropertiesFilter tmPropertiesFilter = servletContextEvent.getServletContext().createFilter(TMPropertiesFilter.class);
+				tmPropertiesFilter.setRestServicesMapping(hsServlets.get("properties?"));
+				String filterName = "TMPropertiesFilter_" + aiContador.incrementAndGet();
+				FilterRegistration.Dynamic dsr = servletContextEvent.getServletContext().addFilter(filterName, tmPropertiesFilter);
+				logger.debug("Generado " + filterName + " para properties " + jsproperties);
+				String[] arrStr = new String[jsproperties.size()];
+				arrStr = jsproperties.toArray(arrStr);
+				dsr.addMappingForUrlPatterns(null, true, arrStr);
+			}
+			jsproperties.clear();
+			hsServlets.clear();
+			sinonimos.clear();
+			// para finalizar, creamos el filtro de sesion
+			filtroIdSesion(servletContextEvent, loadGssProperties, logger);
+		}
+	}
+
+	private void filtroIdSesion(ServletContextEvent servletContextEvent, PropertiesLoader loadGssProperties, Logger logger) throws ServletException {
+		String pattern = loadGssProperties.getProperty("serest4j.idfilter.pattern");
+		if( pattern != null ) {
+			String[] pp = pattern.replace(',', ';').split(";");
+			if( pp != null  &&  pp.length > 0 ) {
+				ArrayList<String> al = new ArrayList<String>(pp.length);
+				for( String str : pp ) {
+					if( str != null  &&  str.trim().length() > 0 ) {
+						al.add(str.trim());
+					}
+				}
+				if( al.size() > 0 ) {
+					pp = al.toArray(new String[al.size()]); 
+					String includes = loadGssProperties.getProperty("serest4j.idfilter.include");
+					String excludes = loadGssProperties.getProperty("serest4j.idfilter.exclude");
+					String login = loadGssProperties.getProperty("serest4j.unautorized.login");
+					String home = loadGssProperties.getProperty("serest4j.unautorized.home");
+					int secs = loadGssProperties.getInteger("serest4j.unautorized.delay", 0);
+					TMIdSesionFilter tmIdSesionFilter = servletContextEvent.getServletContext().createFilter(TMIdSesionFilter.class);
+					String filterName = "TMIdSesionFilter_" + aiContador.incrementAndGet();
+					FilterRegistration.Dynamic dsr = servletContextEvent.getServletContext().addFilter(filterName, tmIdSesionFilter);
+					dsr.addMappingForUrlPatterns(null, true, pp);
+					tmIdSesionFilter.initIdFilter(servletContextEvent.getServletContext().getContextPath(), home, login, includes, excludes, secs, logger);
+					logger.debug("Generado " + filterName + " para " + pattern);
+				}
+			}
+		}
+	}
+
+	private String printSinonimos(HashMap<String, String> sinonimos, String value) {
+		StringBuilder sb = new StringBuilder("\n[");
+		int n = sb.length();
+		int count = 0;
+		for( String key : sinonimos.keySet() ) {
+			if( value.equals(sinonimos.get(key)) ) {
+				count++;
+				sb.append(key);
+				n = sb.length();
+				if( count % 5 == 0 )
+					sb.append('\n');
+				else
+					sb.append(',').append(' ');
+			}
+		}
+		sb.setLength(n);
+		sb.append(']');
+		return sb.toString();
+	}
+
+	private String _javascript(ClassLoader classLoader, String key, String nombreControlador, String contextPath, RestServicesMapping restServicesMapping, Logger logger) {
+		try {
+			String nombreJS = key.substring(0, key.length() - 3).trim().replace('/', '_').replace('.', '_');
+			while( nombreJS.startsWith("_") ) {
+				nombreJS = nombreJS.substring(1).trim();
+			}
+			while( nombreJS.indexOf("__") != -1 ) {
+				nombreJS = nombreJS.replaceAll("__", "_");
+			}
+			logger.debug("Obteniendo javascript para " + nombreJS + ".js, dominio=" + contextPath + ", tipo=jquery, controlador=" + nombreControlador);
+			JQueryAdapter generadorJsJQuery = new JQueryAdapter(logger);
+			return generadorJsJQuery.build(classLoader, nombreControlador, "_jq_" + nombreJS + "_", contextPath, restServicesMapping);
+		} catch (Throwable th) {
+			logger.error("Cargando javascrip " + key + " " + nombreControlador, th);
+		}
+		return null;
+	}
+
+	private CredencialsInterface[] initFirewall(ServletContext servletContext, Logger logger) {
+		try {
+			Collection<CredencialsInterface> credencialesNavegacion = HttpKeyValidator.loadNavigationAccess(logger.isTraceEnabled() ? logger : null, servletContext, null);
+			if( credencialesNavegacion != null  &&  credencialesNavegacion.size() > 0 ) {
+				CredencialsInterface[] ci = new CredencialsInterface[credencialesNavegacion.size()];
+				ci = credencialesNavegacion.toArray(ci);
+				return ci;
+			}
+		}
+		catch(Exception e) {
+			logger.error("registrarLoginUsuario", e);
+		}
+		return null;
+	}
+
+	private String isProxy(Class<?> clase) {
+		TMProxyEnabled tmProxyEnabled = clase.getAnnotation(TMProxyEnabled.class);
+		if( tmProxyEnabled != null ) {
+			return tmProxyEnabled.token();
+		}
+		return null;
+	}
+
+	private String[] getServletConfig(Class<?> clase, PropertiesLoader pl) {
+		TMServlet tmServlet = clase.getAnnotation(TMServlet.class);
+		if( tmServlet != null ) {
+			String[] str = new String[2];
+			str[0] = tmServlet.pattern();
+			if( str[0] != null ) {
+				str[0] = str[0].trim();
+			}
+			str[1] = tmServlet.asynchronous() ? "s" : null;
+			if( str[0].startsWith("ref:") ) {
+				str[0] = pl.getProperty(str[0].substring(4));
+			}
+			if( str[0] != null ) {
+				str[0] = str[0].trim();
+			}
+			if( str[0] != null  && str[0].length() > 0 ) {
+				return str;
+			}
+		}
+		return null;
+	}
+
+	private byte[] loadTokenProxy(ServletContext sc, String tokenP, PropertiesLoader p, Logger logger) {
+		String tokenProxy = tokenP.trim();
+		if( tokenProxy.isEmpty() ) {
+			tokenProxy = Version.VALUE;
+		}
+		return PropertiesLoader.token2bytes(sc, tokenProxy, p, logger);
+	}
+}

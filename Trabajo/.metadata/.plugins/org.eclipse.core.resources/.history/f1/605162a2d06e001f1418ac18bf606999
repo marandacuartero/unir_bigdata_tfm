@@ -1,0 +1,5 @@
+mongo.connectionString=mongodb+srv://marandadbaccess:xoI7ceXpiOcRA0He@mongodbcluster0.mztet.mongodb.net/?retryWrites=true&w=majority&appName=MongoDBCluster0
+
+
+
+# mongo.MongoDB=auditorias

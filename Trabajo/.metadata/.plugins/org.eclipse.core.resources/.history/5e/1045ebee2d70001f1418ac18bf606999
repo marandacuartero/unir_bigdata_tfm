@@ -1,0 +1,173 @@
+package org.serest4j.common;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.Hashtable;
+import java.util.Map;
+import java.util.Properties;
+
+import org.apache.log4j.DailyRollingFileAppender;
+import org.apache.log4j.FileAppender;
+import org.apache.log4j.Hierarchy;
+import org.apache.log4j.Level;
+import org.apache.log4j.Logger;
+import org.apache.log4j.PatternLayout;
+import org.apache.log4j.PropertyConfigurator;
+import org.apache.log4j.SimpleLayout;
+import org.apache.log4j.spi.RootLogger;
+
+/**
+ * Sistem de logs, para realizar el seguimiento de la aplicacion.
+ * Los archivos de log se regeneran de forma ciclica. Cada vez que un archivo
+ * supera un mega de tama&ntilde;o, se genera una copia del mismo y se borra
+ * el archivo de log.<br />
+ * Se mantienen hasta cinco copias.
+ * 
+ * @author maranda
+ *
+ */
+public class FileLogger {
+
+	private static final HashMap<String, FileLogger> instancias = new HashMap<String, FileLogger>();
+
+	public static final void put(String key, FileLogger fileLogger) {
+		synchronized(instancias) {
+			if( fileLogger != null  &&  key != null  &&  !instancias.containsKey(key) ) {
+				instancias.put(key, fileLogger);
+			}
+		}
+	}
+
+	public static final void remove(String key) {
+		synchronized(instancias) {
+			if( key != null ) {
+				FileLogger fl = instancias.remove(key);
+				if( fl != null ) {
+					fl.loggerRepository.shutdown();
+					fl.loggers.clear();
+				}
+				instancias.put(key, null);
+				instancias.remove(key);
+			}
+		}
+	}
+
+	private static final FileLogger get(String key) {
+		synchronized(instancias) {
+			return key == null ? null : instancias.get(key);	
+		}
+	}
+
+	public static final String getLogsDirectory(String contexto) {
+		FileLogger fileLogger = get(contexto);
+		if( fileLogger != null ) {
+			return fileLogger.fileBase.getAbsolutePath();
+		}
+		return new File(System.getProperty("user.home")).getAbsolutePath();
+	}
+
+	public static final Logger getLogger(String contexto) {
+		FileLogger fileLogger = get(contexto);
+		return fileLogger == null ? Logger.getLogger(FileLogger.class) : fileLogger.globalLevel;
+	}
+
+	public static final Logger getLogger() {
+		return Logger.getLogger(FileLogger.class);
+	}
+
+	/**
+	 * 
+	 * @param name
+	 * @param level
+	 * @param notNull true obligamos a contruir el logger, false devuelve el logger solo si esta por encima de lo especificado en el web.xml, en otro
+	 * caso devuelve null
+	 * @return
+	 */
+	public static final Logger getLogger(String contexto, Class<?> name) {
+		return name == null ? getLogger(contexto) : getLogger(contexto, name.getName());
+	}
+
+	public static final Logger getLogger(String contexto, String name) {
+		FileLogger fileLogger = get(contexto);
+		return fileLogger == null ? Logger.getLogger(FileLogger.class) : fileLogger._getControllerFileLogger(name);
+	}
+
+	private Logger globalLevel = null;
+	private File fileBase = null;
+	private Hierarchy loggerRepository = null;
+
+	private FileLogger(String contexto, Properties pl) {
+		loggerRepository = new Hierarchy(new RootLogger((Level) Level.DEBUG));
+		new PropertyConfigurator().doConfigure(pl, loggerRepository);
+		Logger l = loggerRepository.getLogger(contexto.substring(1).toLowerCase());
+		this.globalLevel = l;
+		Enumeration<?> e = l.getAllAppenders();
+		for( ; e.hasMoreElements(); ) {
+			Object obj = e.nextElement();
+			if( obj instanceof FileAppender ) {
+				fileBase = new File(((FileAppender)obj).getFile()).getParentFile();
+				fileBase.mkdirs();
+				System.out.println("Directorio logs creado en" + fileBase.getAbsolutePath());
+			}
+		}
+		loggerRepository.getRendererMap();
+		globalLevel.debug("globalLevel >> " + l.getEffectiveLevel());
+		globalLevel.debug("fileBase >> " + fileBase);
+		System.out.println("fileBase >> " + fileBase);
+	}
+
+	private synchronized Logger _create(String name) {
+		Logger log = loggerRepository.getLogger(name);
+		if( log != null  &&  log.getParent() != null  &&  !(log.getParent() instanceof RootLogger) ) {
+			return log;
+		}
+		if( globalLevel.isDebugEnabled() ) {
+			if( name.lastIndexOf('.') != -1 ) {
+				name = name.substring(name.lastIndexOf('.') + 1);
+			}
+			try {
+				log.setLevel(globalLevel.getEffectiveLevel());
+				SimpleLayout sl = new SimpleLayout();
+				String f = new File(fileBase, name + ".log").getAbsolutePath();
+				globalLevel.info("Logger creado en >> " + f);
+				DailyRollingFileAppender fra = new DailyRollingFileAppender(sl, f, "'.'yyyy-MM-dd-a");
+				fra.setLayout(new PatternLayout("%d %-5p (%C{1}.%M:%L) %m%n"));
+				log.addAppender(fra);
+				return log;
+			} catch(IOException ioe) {
+				globalLevel.error("Error creando logger para " + name, ioe);
+			}
+		}
+		return log;
+	}
+
+	private Map<String, Logger> loggers = Collections.synchronizedMap(new Hashtable<String, Logger>());
+
+	private synchronized Logger _getControllerFileLogger(String name) {
+		Logger l = null;
+		StringBuilder sb = new StringBuilder();
+		if( name != null )
+			sb.append(name.trim());
+		while( sb.length() > 0  &&  sb.charAt(0) == File.separatorChar )
+			sb.deleteCharAt(0);
+		while( sb.length() > 0  &&  sb.charAt(sb.length() - 1) == File.separatorChar )
+			sb.deleteCharAt(sb.length() - 1);
+		String _name = sb.toString().trim();
+		if( _name.length() <= 0 ) {
+			return globalLevel;
+		}
+		l = loggers.get(_name);
+		if( l == null ) {
+			synchronized( loggers ) {
+				l = _create(_name);
+				if( l != null ) {
+					loggers.put(_name, l);
+				}
+			}
+		}
+		return l;
+	}
+}

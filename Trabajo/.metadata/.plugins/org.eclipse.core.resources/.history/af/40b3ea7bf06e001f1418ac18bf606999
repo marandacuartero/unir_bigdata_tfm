@@ -1,0 +1,53 @@
+package org.unir.tfm;
+
+import org.apache.log4j.Logger;
+import org.bson.Document;
+import org.serest4j.annotation.db.TMNoDataSource;
+import org.serest4j.annotation.endpoint.TMServlet;
+import org.serest4j.annotation.rest.TMRest;
+import org.serest4j.annotation.service.TMInjectableContext;
+import org.serest4j.common.PropertiesLoader;
+import org.serest4j.context.ServerStaticContext;
+import org.serest4j.context.TMContext;
+
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+
+@TMServlet(pattern = "/writer/*")
+//@TMInjectableContext
+//@TMDataSource("jdbc/IanseoDest")
+@TMNoDataSource
+@TMInjectableContext
+public class DataWriter {
+
+	ServerStaticContext sc;
+	TMContext contexto;
+	Logger debug;
+
+	@TMRest
+	public String testMongo() {
+		PropertiesLoader pl = sc.getPropertiesLoader();
+		String connectionString = pl.getProperty("mongo.connectionString");
+
+		try (MongoClient mongoClient = MongoClients.create(connectionString)) {
+
+			// Conexión a la base de datos en Atlas
+			MongoDatabase database = mongoClient.getDatabase("ianseo");
+
+			// Obtener una colección
+			MongoCollection<Document> collection = database.getCollection("prueba");
+			Document document = new Document("nombre", "Carlos").append("edad", 30).append("ciudad", "Madrid");
+
+// Insertar el documento en la colección
+			collection.insertOne(document);
+
+			// Verificar la conexión
+			return "Conectado a la colección en Atlas: " + collection.getNamespace();
+		}
+
+	}
+	
+
+}

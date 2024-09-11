@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<!--
+Este tag permite realizar el control de roles dentro del cuerpo de cada JSP, lo que nos permite visualizar partes concretas de un JSP
+en funcion de sus roles, o incluso no visualizar el JSP
+La declaracion del tag es:
+ <%@ taglib prefix="tmy" uri="http://localhost/serest4j/tags/tmy"%>
+
+Un ejemplo:
+<tmy:validar roles="ACCESO_BASICO" >
+	<tmy:validar roles="ACCESO_1,ACCESO_3,ACCESO_4">
+	<h1>Soy el 1, o el 3, o el 4</h1>
+	</tmy:validar>
+	<tmy:validar roles="ACCESO_2">
+	<h1>Soy el 2</h1>
+		<tmy:validar roles="ACCESO_21">
+		<h2>Soy el 2.1</h2>
+			<tmy:validar roles="ACCESO_211">
+			<h3>Soy el 2.1.1</h3>
+			</tmy:validar>
+			<tmy:validar  scope = "page" roles="ACCESO_212">
+			<h3>Soy el 2.1.2</h3>
+			</tmy:validar>
+		</tmy:validar>
+	</tmy:validar>
+</tmy:validar>
+
+<div> Resto del JSP </div>
+
+En este ejemplo mostramos lo que vera un usuario con:
+ACCESO_BASICO : <div> Resto del JSP </div>
+ACCESO_BASICO + ACCESO_1 (o _2 o _4):  <h1>Soy el 1, o el 3, o el 4</h1> <div> Resto del JSP </div>
+etc.
+Si el usuario cumple todos los roles desde el _2 hasta el _212, podra visualizar el arbol completo, mas el resto del jsp
+Pero si el usuario no cumple el rol ACCESO_212, entonces no podra visualizar nada de este JSP, le aparecera vacio
+ya que la validacion a nivel de este rol es de scope="page" y por lo tanto se aplica a toda la pagina, y no solo al cuerpo
+que engloba el propio tag.
+
+Tambien se puede realizar una validacion inversa (modo restriccion), con el simbolo del NOT en Java ('!'), introducido como el primer caracter
+de la cadena
+Asi pues <tmy:validar roles="!ACCESO_1,ACCESO_3,ACCESO_4"> nos estaria validando que no se cumple ninguno de los roles indicados
+
+Se incluye tambien el modo de validacion. Por defecto se valida que se cumpla alguno de los roles indicados en el parametro 'roles'.
+Pero incluyendo la sentencia mode="all" conseguimos que valide el cumplimiendo de todos y cada uno de los roles indicados en ese parametro.
+Resumiento, podemos hacer las sigueintes combinaciones:
+<tmy:validar roles="ACCESO_1,ACCESO_3,ACCESO_4"> nos estara validando el acceso si se cumple alguno de los roles indicados
+<tmy:validar roles="!ACCESO_1,ACCESO_3,ACCESO_4"> nos estara restringiendo el acceso si se cumple alguno de los roles indicados
+<tmy:validar roles="ACCESO_1,ACCESO_3,ACCESO_4" mode="all"> nos estara validando el acceso si se cumplen todos los roles indicados
+<tmy:validar roles="!ACCESO_1,ACCESO_3,ACCESO_4" mode="all"> nos estara restringiendo el acceso si se cumplen todos los roles indicados
+
+Tambien se pueden montar sentencias de tipo if - else
+<tmy:validar roles="ACCESO_BASICO" >
+ <h1>Tengo acceso</h1>
+</tmy:validar>  
+<tmy:validar roles="!ACCESO_BASICO" >
+ <h1>No teengo acceso</h1>
+</tmy:validar>  
+
+-->
+
+<taglib xmlns="http://java.sun.com/xml/ns/javaee"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://java.sun.com/xml/ns/javaee http://java.sun.com/xml/ns/javaee/web-jsptaglibrary_2_1.xsd"
+    version="2.1">
+    
+  <description>Framework WS Comprobacion de Credenciales en JSP</description>
+  <display-name>Framework WS Credentials</display-name>
+  <tlib-version>1.0</tlib-version>
+  <short-name>tmy</short-name>
+  <uri>http://localhost/serest4j/tags/tmy</uri>
+
+  <tag>
+    <description>
+        Comprueba el listado de roles dentro de la sesion del usuario
+    </description>
+    <name>validar</name>
+    <tag-class>org.serest4j.http.idserver.policy.TMAccessRolesValidatorTag</tag-class>
+    <body-content>JSP</body-content>
+    <attribute>
+        <description>
+Ambito de comprobación de los roles, aplicado a toda la pagina (page)
+o solo al cuerpo que engloba el tag (body), este ultimo es el valor por defecto.
+        </description>
+        <name>scope</name>
+        <required>false</required>
+        <rtexprvalue>false</rtexprvalue>
+    </attribute>
+    <attribute>
+        <description>
+Listado de roles separados por comas o por punto y coma, de los cuales al menos uno se debe de cumplir
+para que el usuarios siga teniendo acceso a la navegacion de esta pagina
+Si no se pasa este parametro, equivale a no tener permisos sobre este punto de la navegacion
+        </description>
+        <name>roles</name>
+        <required>true</required>
+        <rtexprvalue>true</rtexprvalue>
+    </attribute>
+    <attribute>
+        <description>
+        Modo de validacion (all) valida el cumplimiento de todos los roles, (any) valida que se cumpla solamente alguno de ellos.
+        Este es el modo por defecto mode='any'.
+        </description>
+        <name>mode</name>
+        <required>false</required>
+        <rtexprvalue>false</rtexprvalue>
+    </attribute>
+  </tag>
+</taglib>

@@ -1,0 +1,61 @@
+package org.unir.tfm;
+
+import java.io.IOException;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.Iterator;
+
+import org.apache.log4j.Logger;
+import org.serest4j.annotation.db.TMNoDataSource;
+import org.serest4j.annotation.endpoint.TMServlet;
+import org.serest4j.annotation.rest.TMRest;
+import org.serest4j.annotation.service.TMInjectableContext;
+import org.serest4j.context.TMContext;
+import org.serest4j.proxy.InternalProxyFactory;
+import org.unir.tfm.dao.Tournament;
+import org.unir.tfm.dao.TrazaTorneo;
+
+@TMServlet(pattern = "/copy/*")
+@TMInjectableContext
+@TMNoDataSource
+public class TraceController {
+	private static int BUCKET_SIZE = 10;
+	
+	TMContext contexto;
+	Logger debug;
+	private SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
+	private DataAnonimizer dataAnonimizer = new DataAnonimizer();
+	 
+	
+	@TMRest
+	public Iterator<Object> fromDate(String str) throws ParseException, IOException {
+		ArrayList<TrazaTorneo> al = new ArrayList<TrazaTorneo>();
+		dataAnonimizer.init();
+		Date fecha = sdf.parse(str);
+		IDataWriter iDataWriter = InternalProxyFactory.getProxy(IDataWriter.class, contexto);
+		Iterator<Tournament> it = InternalProxyFactory.getProxy(IDataLoader.class, contexto).loadTournamentsFrom(fecha);
+		while( it.hasNext() ) {
+			Tournament tournament = it.next();
+			contexto.sendOutput("Leido torneo " + tournament.getId());
+			dataAnonimizer.refactor(tournament, debug);
+			contexto.sendOutput("Participantes anonimizados " + tournament.getParticipantes().length);
+			TrazaTorneo[] trazas = BuildTrazas.convert(tournament);
+			for( TrazaTorneo t : trazas ) {
+				al.add(t);
+				if( al.size() >= BUCKET_SIZE ) {
+					contexto.sendOutput("Enviadas " + al.size() + " trazas");
+					iDataWriter.saveTrazas(al.toArray(new TrazaTorneo[al.size()]));
+					al.clear();
+				}
+			}
+		}
+		if( al.size() > 0 ) {
+			contexto.sendOutput("Enviadas " + al.size() + " trazas");
+			iDataWriter.saveTrazas(al.toArray(new TrazaTorneo[al.size()]));
+		}
+		al.clear();
+		return null;
+	}
+}

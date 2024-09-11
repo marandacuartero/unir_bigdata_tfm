@@ -1,0 +1,25 @@
+package es.aragon.eapl.tools.dao;
+
+import org.serest4j.annotation.db.TMNoDataSource;
+import org.serest4j.annotation.endpoint.TMServlet;
+import org.serest4j.annotation.rest.TMRest;
+import org.serest4j.annotation.service.TMBasicController;
+
+/**
+ * Controlador utilizado para accesos a base de datos
+ * 
+ * Define un punto de acceso por post, por peticiones serializadas en '/eapl_priv/logs_p'.
+ * Tambien puede ser accedido desde ILogsController por  '/eapl_priv/logs?' 
+ * 
+ * @author mario.aranda
+ */
+@TMServlet(pattern = "/hola/*")
+@TMBasicController
+@TMNoDataSource
+public class DataController {
+
+    @TMRest
+	public String hola(String str) {
+		return "Hola " + str;
+	}
+}

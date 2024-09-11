@@ -1,0 +1,53 @@
+package org.unir.tfm.dao;
+
+import java.util.Date;
+
+public class Tournament {
+	
+	private int id;
+	private String code;
+	private String name;
+	private Date fecha;
+	private Club club;
+	
+	public Club getClub() {
+		return club;
+	}
+	public void setClub(Club club) {
+		this.club = club;
+	}
+	public String[] getParticipantes() {
+		return participantes;
+	}
+	public void setParticipantes(String[] participantes) {
+		this.participantes = participantes;
+	}
+	private String[] participantes;
+	
+	public int getId() {
+		return id;
+	}
+	public void setId(int id) {
+		this.id = id;
+	}
+	public String getCode() {
+		return code;
+	}
+	public void setCode(String code) {
+		this.code = code;
+	}
+	public String getName() {
+		return name;
+	}
+	public void setName(String name) {
+		this.name = name;
+	}
+	public Date getFecha() {
+		return fecha;
+	}
+	public void setFecha(Date fecha) {
+		this.fecha = fecha;
+	}
+	
+	
+}

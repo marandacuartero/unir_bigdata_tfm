@@ -1,0 +1,86 @@
+package org.unir.tfm;
+
+import java.util.ArrayList;
+import java.util.Date;
+
+import org.apache.log4j.Logger;
+import org.bson.Document;
+import org.serest4j.annotation.db.TMNoDataSource;
+import org.serest4j.annotation.rest.TMRest;
+import org.serest4j.annotation.service.TMInjectableContext;
+import org.serest4j.annotation.service.TMNoWaitResponse;
+import org.serest4j.common.PropertiesLoader;
+import org.serest4j.context.ServerStaticContext;
+import org.serest4j.context.TMContext;
+import org.unir.tfm.dao.TrazaTorneo;
+
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.result.DeleteResult;
+import com.mongodb.client.result.InsertManyResult;
+
+@TMNoDataSource
+@TMInjectableContext
+public class MongoDBWriter implements IMongoDBWriter {
+
+	ServerStaticContext sc;
+	TMContext contexto;
+	Logger debug;
+	
+	@TMRest
+	public long cleanFrom(Date fecha) {
+		PropertiesLoader pl = sc.getPropertiesLoader();
+		String connectionString = pl.getProperty("mongo.connectionString");
+		try (MongoClient mongoClient = MongoClients.create(connectionString)) {
+			// Conexión a la base de datos en Atlas
+			MongoDatabase database = mongoClient.getDatabase("ianseo");
+			// Obtener una colección
+			MongoCollection<Document> collection = database.getCollection("trazatorneos");
+			Document filter = new Document("TTFecha", new Document("$gte", fecha));
+			DeleteResult result = collection.deleteMany(filter);
+
+			debug.info("Documentos eliminados: " + result.getDeletedCount());
+			return result.getDeletedCount();
+		}
+	}
+
+	@TMRest
+	@TMNoWaitResponse
+	public void saveTrazas(TrazaTorneo[] trazaTorneos) {
+		
+		PropertiesLoader pl = sc.getPropertiesLoader();
+		String connectionString = pl.getProperty("mongo.connectionString");
+		try (MongoClient mongoClient = MongoClients.create(connectionString)) {
+			// Conexión a la base de datos en Atlas
+			MongoDatabase database = mongoClient.getDatabase("ianseo");
+			// Obtener una colección
+			MongoCollection<Document> collection = database.getCollection("trazatorneos");
+			ArrayList<Document> alDocuments = new ArrayList<Document>();
+			for( TrazaTorneo tt : trazaTorneos ) {
+				Document document = saveTrazas(tt);
+				alDocuments.add(document);
+			}
+			InsertManyResult imr = collection.insertMany(alDocuments);
+			debug.info("Insertados " + imr.getInsertedIds());
+		}
+	}
+
+	private Document saveTrazas(TrazaTorneo tt) {
+		Document document = new Document("_id", tt.getIdTraza());
+		document.append("TTCodigoTorneo", tt.getCodigoTorneo());
+		document.append("TTNombreTorneo", tt.getNombreTorneo());
+		document.append("TTFecha", tt.getFecha());
+		document.append("TTNombreParticipante", tt.getNombreParticipante());
+		document.append("TTNombreClub", tt.getNombreClub());
+		document.append("TTPuntosEntrada1", tt.getPuntosEntrada1());
+		document.append("TTDiezEntrada1", tt.getDiezEntrada1());
+		document.append("TTxEntrada1", tt.getxEntrada1());
+		document.append("TTPuntosEntrada2", tt.getPuntosEntrada2());
+		document.append("TTDiezEntrada2", tt.getDiezEntrada2());
+		document.append("TTxEntrada2", tt.getxEntrada2());
+		return document;
+	}
+
+}

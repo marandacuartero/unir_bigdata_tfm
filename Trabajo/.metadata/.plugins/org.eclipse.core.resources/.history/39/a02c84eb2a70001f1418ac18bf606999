@@ -1,0 +1,28 @@
+#
+# Copyright (C) 2013 Gobierno de Aragón
+# License: EUPL (version 1.1 or later). See LICENSE.txt for details.
+#
+# For the general syntax of property based configuration files see the
+# documenation of org.apache.log4j.PropertyConfigurator.
+
+# The root category uses the appender called A1. Since no priority is
+# specified, the root category assumes the default priority for root
+# which is ALL in log4j. The root category is the only category that
+# has a default priority. All other categories need not be assigned a
+# priority in which case they inherit their priority from the
+# hierarchy.
+
+log4j.logger.org.serest4j = TRACE, IANSEO
+log4j.logger.org.unir.tfm = TRACE, IANSEO
+log4j.logger.tfm_backend = TRACE, IANSEO
+
+#######################
+## APPENDER
+#######################
+
+log4j.appender.IANSEO=org.apache.log4j.RollingFileAppender
+log4j.appender.IANSEO.File=IanseoDB.log
+log4j.appender.IANSEO.MaxFileSize=5MB
+log4j.appender.IANSEO.MaxBackupIndex=6
+log4j.appender.IANSEO.layout=org.apache.log4j.PatternLayout
+log4j.appender.IANSEO.layout.ConversionPattern=%d %p [%c] - %m%n

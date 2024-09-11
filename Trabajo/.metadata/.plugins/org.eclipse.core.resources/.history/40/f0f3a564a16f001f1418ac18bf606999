@@ -1,0 +1,10 @@
+package org.unir.tfm;
+
+import org.serest4j.annotation.endpoint.TMLinkController;
+import org.unir.tfm.dao.TrazaTorneo;
+
+@TMLinkController(controller=MongoDBWriter.class)
+public interface IMongoDBWriter {
+
+	public void saveTrazas(TrazaTorneo[] trazaTorneos);
+}

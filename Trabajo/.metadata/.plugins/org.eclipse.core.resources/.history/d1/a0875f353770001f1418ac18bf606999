@@ -1,0 +1,9 @@
+package org.unir.tfm;
+
+import org.serest4j.annotation.db.TMDataSource;
+import org.serest4j.annotation.service.TMInjectableContext;
+
+
+@TMInjectableContext
+@TMDataSource("jdbc/IanseoDest2")
+public class DataWriter2 extends DataWriter {}

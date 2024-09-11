@@ -1,0 +1,15 @@
+package org.unir.tfm;
+
+import java.sql.SQLException;
+import java.util.Date;
+
+import org.serest4j.annotation.endpoint.TMLinkController;
+import org.unir.tfm.dao.TrazaTorneo;
+
+@TMLinkController(controller=DataWriter.class)
+public interface IDataWriter {
+
+	public int cleanFrom(Date fecha) throws SQLException;
+
+	public void saveTrazas(TrazaTorneo[] trazaTorneos) throws SQLException;
+}

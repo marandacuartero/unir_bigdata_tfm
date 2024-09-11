@@ -1,0 +1,62 @@
+package org.unir.tfm;
+
+import java.util.ArrayList;
+
+import org.apache.log4j.Logger;
+import org.serest4j.annotation.db.TMDataSource;
+import org.serest4j.annotation.endpoint.TMServlet;
+import org.serest4j.annotation.rest.TMRest;
+import org.serest4j.annotation.service.TMInjectableContext;
+import org.serest4j.db.AutoQueryBuilder;
+import org.serest4j.db.InsertBuilder;
+import org.serest4j.db.TMTransactionalLogger;
+
+/**
+ * Controlador utilizado para accesos a base de datos
+ * 
+ * Define un punto de acceso por post, por peticiones serializadas en '/eapl_priv/logs_p'.
+ * Tambien puede ser accedido desde ILogsController por  '/eapl_priv/logs?' 
+ * 
+ * @author mario.aranda
+ */
+@TMServlet(pattern = "/saludo2/*")
+@TMInjectableContext
+@TMDataSource("jdbc/IanseoDest")
+public class DataController2 {
+
+	TMTransactionalLogger tl;
+	Logger error; 
+	
+    @TMRest
+	public String hola(String str) {
+		return "Hola " + str;
+	}
+
+    @TMRest
+	public String[] hola2() {
+    	ArrayList<String> al = new ArrayList<String>();
+    	try( AutoQueryBuilder qb = new AutoQueryBuilder("prueba") ) {
+			qb.listColumnValues("uno", al, String.class, tl);
+			al.add(qb.toString());
+		} catch(Exception e) {
+			error.error("en prueba", e);
+		}
+		return al.toArray(new String[al.size()]);
+
+	}
+
+    @TMRest
+	public int hola3(int aaa) {
+    	InsertBuilder ib = new InsertBuilder("prueba");
+    	ib.appendInt("uno", aaa);
+    	ib.appendInt("dos", aaa + 1);
+    	ib.appendInt("tres", aaa + 2);
+    	try {
+    	  return ib.executeUpdate(tl);
+    	} catch(Exception e) {
+			error.error("insertando en prueba", e);
+		}
+    	return -1;
+	}
+    
+}

@@ -1,0 +1,47 @@
+package org.unir.tfm;
+
+import java.sql.SQLException;
+
+import org.apache.log4j.Logger;
+import org.serest4j.annotation.db.TMDataSource;
+import org.serest4j.annotation.rest.TMRest;
+import org.serest4j.annotation.service.TMInjectableContext;
+import org.serest4j.annotation.service.TMNoWaitResponse;
+import org.serest4j.db.InsertBuilder;
+import org.serest4j.db.TMTransactionalLogger;
+import org.unir.tfm.dao.TrazaTorneo;
+
+@TMInjectableContext
+@TMDataSource("jdbc/IanseoDest")
+public class DataWriter implements IDataWriter {
+
+	TMTransactionalLogger tl;
+	Logger debug;
+
+	@TMRest
+	@TMNoWaitResponse
+	public void saveTrazas(TrazaTorneo[] trazaTorneos) {
+		InsertBuilder ib = new InsertBuilder("trazatorneo");
+		ib.setPretty(true);
+		for (TrazaTorneo tt : trazaTorneos) {
+			ib.append("TTCodigoTorneo", tt.getCodigoTorneo());
+			ib.append("TTNombreTorneo", tt.getNombreTorneo());
+			ib.appendDate("TTFecha", tt.getFecha());
+			ib.append("TTNombreParticipante", tt.getNombreParticipante());
+			ib.append("TTNombreClub", tt.getNombreClub());
+			ib.appendInt("TTPuntosEntrada1", tt.getPuntosEntrada1());
+			ib.appendInt("TTDiezEntrada1", tt.getDiezEntrada1());
+			ib.appendInt("TTxEntrada1", tt.getxEntrada1());
+			ib.appendInt("TTPuntosEntrada2", tt.getPuntosEntrada2());
+			ib.appendInt("TTDiezEntrada2", tt.getDiezEntrada2());
+			ib.appendInt("TTxEntrada2", tt.getxEntrada2());
+			ib.addBatch();
+		}
+		try {
+			int i = ib.executeBatch(tl);
+			debug.info("Generadas " + i + " nuevas trazas");
+		} catch (SQLException e) {
+			debug.error("Error en consulta saveTrazas ", e);
+		}
+	}
+}

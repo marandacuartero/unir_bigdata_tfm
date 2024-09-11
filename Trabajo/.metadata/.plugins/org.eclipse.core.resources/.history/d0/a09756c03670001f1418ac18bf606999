@@ -1,0 +1,14 @@
+package org.unir.tfm;
+
+import org.apache.log4j.Logger;
+import org.serest4j.annotation.db.TMDataSource;
+import org.serest4j.annotation.service.TMInjectableContext;
+import org.serest4j.db.TMTransactionalLogger;
+
+@TMInjectableContext
+@TMDataSource("jdbc/IanseoDest")
+public class DataWriter1 extends DataWriter {
+
+	TMTransactionalLogger tl;
+	Logger debug;
+}

@@ -1,0 +1,82 @@
+package org.unir.tfm;
+
+import java.io.IOException;
+import java.sql.SQLException;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.Iterator;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import org.apache.log4j.Logger;
+import org.serest4j.annotation.db.TMNoDataSource;
+import org.serest4j.annotation.endpoint.TMLinkController;
+import org.serest4j.annotation.endpoint.TMServlet;
+import org.serest4j.annotation.rest.TMRest;
+import org.serest4j.annotation.service.TMInjectableContext;
+import org.serest4j.context.TMContext;
+import org.serest4j.proxy.InternalProxyFactory;
+import org.unir.tfm.dao.Tournament;
+import org.unir.tfm.dao.TrazaTorneo;
+
+@TMServlet(pattern = "/copy/*")
+@TMInjectableContext
+@TMNoDataSource
+public class TraceController {
+	private static int BUCKET_SIZE = 100;
+
+	TMContext contexto;
+	Logger logger;
+	
+	private SimpleDateFormat sdf = new SimpleDateFormat("dd-MM-yyyy");
+	private DataAnonimizer dataAnonimizer = new DataAnonimizer();
+	 
+	
+	@TMRest
+	public Iterator<Object> fromDate(String str) throws ParseException, IOException, SQLException {
+		ArrayList<TrazaTorneo> al = new ArrayList<TrazaTorneo>();
+		dataAnonimizer.init();
+		Date fecha = sdf.parse(str);
+		IDataWriter2 iDataWriter = InternalProxyFactory.getProxy(IDataWriter2.class, contexto);
+		IMongoDBWriter iMongoDBWriter = InternalProxyFactory.getProxy(IMongoDBWriter.class, contexto);
+		Iterator<Tournament> it = InternalProxyFactory.getProxy(IDataLoader.class, contexto).loadTournamentsFrom(fecha);
+		AtomicBoolean deleted = new AtomicBoolean(false);
+		while( it.hasNext() ) {
+			Tournament tournament = it.next();
+			contexto.sendOutput("Leido torneo " + tournament.getId());
+			dataAnonimizer.refactor(tournament, logger);
+			contexto.sendOutput("Participantes anonimizados " + tournament.getParticipantes().length);
+			TrazaTorneo[] trazas = BuildTrazas.convert(tournament);
+			for( TrazaTorneo t : trazas ) {
+				al.add(t);
+				if( al.size() >= BUCKET_SIZE ) {
+					if( deleted.compareAndSet(false, true) ) {
+						iDataWriter.cleanFrom(fecha);
+						iMongoDBWriter.cleanFrom(fecha);
+					}
+					contexto.sendOutput("Enviadas " + al.size() + " trazas");
+					TrazaTorneo[] subtt = al.toArray(new TrazaTorneo[al.size()]);
+					iDataWriter.saveTrazas(subtt);
+					iMongoDBWriter.saveTrazas(subtt);
+					al.clear();
+				}
+			}
+		}
+		if( al.size() > 0 ) {
+			contexto.sendOutput("Enviadas " + al.size() + " trazas");
+			TrazaTorneo[] subtt = al.toArray(new TrazaTorneo[al.size()]);
+			iDataWriter.saveTrazas(subtt);
+			iMongoDBWriter.saveTrazas(subtt);
+		}
+		al.clear();
+		return null;
+	}
+	
+	@TMLinkController(controller=DataWriter1.class)
+	public interface IDataWriter1 extends IDataWriter {}
+	
+	@TMLinkController(controller=DataWriter2.class)
+	public interface IDataWriter2 extends IDataWriter {}
+
+}

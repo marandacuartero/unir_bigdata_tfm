@@ -1,0 +1,5 @@
+package org.unir.tfm.dao;
+
+public class Calificaciones {
+
+}
